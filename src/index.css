@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-navy: #090D16;
+    --card-slate: #121826;
+    --card-slate-border: rgba(255, 255, 255, 0.08);
+    --accent-blue: #3B82F6;
+  }
+}
+
+/* Custom Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #090d16;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1f293d;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* Font mono utility */
+.font-mono-code {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Background ambient glow effects */
+.bg-radial-navy {
+  background: radial-gradient(circle at 50% 0%, rgba(37, 99, 235, 0.08) 0%, transparent 60%);
+}
+
+.bg-radial-card {
+  background: radial-gradient(circle at 100% 0%, rgba(59, 130, 246, 0.04) 0%, transparent 50%);
+}
+

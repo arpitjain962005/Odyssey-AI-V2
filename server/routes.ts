@@ -499,16 +499,16 @@ apiRouter.get('/agents', async (req: Request, res: Response) => {
       },
       {
         id: 'route-analyst',
-        name: 'Route Analyst',
-        role: 'Network & Optimization',
-        purpose: 'Analyzes route profitability, growth, reliability and opportunity.',
+        name: 'Athena',
+        role: 'Route Analyst',
+        purpose: 'Analyses route performance and identifies opportunities.',
         status: 'Online',
         watching: '20 corridors',
         latestSummary: 'Shanghai → Singapore #1 opportunity (+18.2%)',
         avatarIcon: 'TrendingUp',
-        endpoint: '/api/agents/route-analyst',
-        webhookEnvVar: 'ROUTE_ANALYST_WEBHOOK_URL',
-        isWebhookConfigured: Boolean(process.env.ROUTE_ANALYST_WEBHOOK_URL?.trim().startsWith('http')),
+        endpoint: '/api/athena',
+        webhookEnvVar: 'ATHENA_WEBHOOK_URL',
+        isWebhookConfigured: Boolean((process.env.ATHENA_WEBHOOK_URL || process.env.ROUTE_ANALYST_WEBHOOK_URL || 'https://phenomenal2005.app.n8n.cloud/webhook/athena-route-analysis')?.trim().startsWith('http')),
         capabilities: [
           'Compare routes',
           'Find profitable routes',
@@ -519,9 +519,9 @@ apiRouter.get('/agents', async (req: Request, res: Response) => {
         ],
         primaryAction: {
           id: 'analyze-routes',
-          label: 'Analyze Routes',
+          label: 'Ask Athena / Analyze',
           task: 'analyze_routes',
-          taskDescription: 'Analyzing route profitability, volume growth, and opportunity lanes...'
+          taskDescription: 'Analyses route performance, volume growth, and opportunity corridors...'
         },
         secondaryAction: {
           id: 'view-rising',
@@ -695,75 +695,510 @@ const handleJourneyMonitor = async (req: Request, res: Response) => {
 apiRouter.post('/agents/journey-monitor', handleJourneyMonitor);
 apiRouter.get('/agents/journey-monitor', handleJourneyMonitor);
 
-// 10.3 AGENT NODE 2: Route Analyst Endpoint
-const handleRouteAnalyst = async (req: Request, res: Response) => {
-  try {
-    const { task = 'analyze_routes', filters = {}, context = {} } = req.body || {};
-    
-    const result = await dispatchAgentNode(
-      'route_analyst',
-      'ROUTE_ANALYST_WEBHOOK_URL',
-      task,
-      filters,
-      context,
-      async () => {
-        const db = await getDb();
-        const topRoutes = parseQueryResults(db.exec('SELECT * FROM routes ORDER BY opportunity_score DESC LIMIT 3'));
-        
-        return {
-          status: 'success',
-          agent: 'route_analyst',
-          agentName: 'Route Analyst',
-          role: 'Network & Optimization',
-          summary: 'Shanghai → Singapore is currently the strongest opportunity.\n\nGrowth: +18.2%\nReliability: 98%\nOpportunity Score: 92',
-          findings: [
-            {
-              title: 'Shanghai → Singapore (R001)',
-              detail: 'Leading opportunity lane with +18.2% volume growth and 98% service reliability. High electronics demand.',
-              severity: 'resolved',
-              highlight: 'Opportunity Score: 92'
-            },
-            {
-              title: 'Singapore → Dubai Air Express (R014)',
-              detail: 'High-yield priority air corridor achieving 41.5% gross margin with 14-hour transit speed.',
-              severity: 'info',
-              highlight: 'Margin: 41.5%'
-            },
-            {
-              title: 'Hamburg → Jebel Ali (R007)',
-              detail: 'Underperforming lane with -6.4% volume contraction and elevated container dwell days.',
-              severity: 'warning',
-              highlight: 'Declining Lane'
-            }
-          ],
-          metrics: {
-            total_corridors: 20,
-            rising_lanes: 7,
-            top_opportunity: 'Shanghai → Singapore',
-            top_lane_growth: '+18.2%',
-            network_avg_reliability: '94.2%'
-          },
-          recommendations: [
-            'Increase feeder vessel container allocation on Shanghai → Singapore by +15%',
-            'Reallocate underutilized capacity from Hamburg corridor to high-demand Asian lanes',
-            'Lock in forward booking contracts for consumer electronics batches'
-          ],
-          suggestedAction: {
-            label: 'View Rising',
-            navId: 'rising'
-          }
-        };
-      }
-    );
+// 10.3 ATHENA ROUTE ANALYST (Published n8n Workflow Integration + Local Fallback)
 
-    res.json(result);
+function generateLocalAthenaAnalysis(questionRaw: string, task: string) {
+  const q = (questionRaw || '').toLowerCase().trim();
+
+  // Out of scope check: if question has text and is unrelated to supply chain / routes
+  const isRouteRelated = !q || [
+    'route', 'corridor', 'lane', 'profit', 'margin', 'growth', 'grow', 'revenue',
+    'cost', 'reliability', 'capacity', 'perform', 'best', 'worst', 'attention',
+    'shanghai', 'singapore', 'rotterdam', 'mumbai', 'jebel ali', 'hamburg',
+    'los angeles', 'rising', 'falling', 'watch', 'opportunity', 'analyze', 'check',
+    'which', 'where', 'how', 'freight', 'volume'
+  ].some(k => q.includes(k));
+
+  if (q && !isRouteRelated) {
+    return {
+      status: 'success',
+      agent: 'athena',
+      agentName: 'ATHENA',
+      role: 'Route Analyst',
+      question: questionRaw,
+      summary: 'Athena is focused on route performance and profitability. Try asking about routes, margins, growth, reliability or capacity.',
+      answer: 'Athena is focused on route performance and profitability. Try asking about routes, margins, growth, reliability or capacity.',
+      findings: [
+        {
+          title: 'Scope Clarification',
+          detail: 'Athena specializes in corridor analytics, trade lane profitability, capacity planning, and growth opportunity scoring.',
+          severity: 'info',
+          highlight: 'Route Analyst Scope'
+        }
+      ],
+      recommendations: [
+        'Ask "Which route is most profitable?"',
+        'Ask "Which route needs attention?"',
+        'Ask "Where should we increase capacity?"',
+        'Ask "Which routes are performing best overall?"'
+      ],
+      metrics: {
+        supported_domains: 'Revenue, Cost, Profit, Margin, Growth, Reliability',
+        active_routes: 20
+      },
+      suggestedAction: {
+        label: 'View Rising',
+        navId: 'rising'
+      }
+    };
+  }
+
+  // 1. Most profitable route
+  if (q.includes('profit') && (q.includes('most') || q.includes('highest') || q.includes('top') || q.includes('best') || q.includes('max') || !q.includes('margin'))) {
+    return {
+      status: 'success',
+      agent: 'athena',
+      agentName: 'ATHENA',
+      role: 'Route Analyst',
+      question: questionRaw || 'Which route is most profitable?',
+      summary: 'Shanghai → Singapore (R001) is Odyssey\'s most profitable route, delivering $440,000 gross profit on $1,420,000 revenue with a 31.0% margin and +18.2% volume growth.',
+      answer: 'Shanghai → Singapore (R001) is Odyssey\'s most profitable route, delivering $440,000 gross profit on $1,420,000 revenue with a 31.0% margin and +18.2% volume growth.',
+      findings: [
+        {
+          title: 'Shanghai → Singapore (R001)',
+          detail: 'Generated $440,000 gross profit (31.0% profit margin) across 32 active shipments.',
+          severity: 'resolved',
+          highlight: '$440K Profit (Rank #1)'
+        },
+        {
+          title: 'Singapore → Rotterdam (R002)',
+          detail: 'Ranked #2 in absolute profit ($385,000) with 29.8% margin and 97% reliability.',
+          severity: 'info',
+          highlight: '$385K Profit'
+        },
+        {
+          title: 'Singapore → Dubai Air Express (R014)',
+          detail: 'Delivers the highest percentage margin at 41.5% with $174,300 gross profit.',
+          severity: 'info',
+          highlight: '41.5% Margin'
+        }
+      ],
+      recommendations: [
+        'Protect container allocation for Vertex Electronics on the Shanghai-Singapore lane',
+        'Prioritize high-yield consumer electronics cargo batches during peak bookings'
+      ],
+      metrics: {
+        top_profitable_route: 'Shanghai → Singapore',
+        top_profit_amount: '$440,000',
+        top_profit_margin: '31.0%',
+        lane_reliability: '98%'
+      },
+      suggestedAction: {
+        label: 'View Revenue',
+        navId: 'revenue'
+      }
+    };
+  }
+
+  // 2. Highest margin
+  if (q.includes('margin')) {
+    return {
+      status: 'success',
+      agent: 'athena',
+      agentName: 'ATHENA',
+      role: 'Route Analyst',
+      question: questionRaw || 'Which route has the highest margin?',
+      summary: 'Singapore → Dubai Air Express (R014) delivers the highest profit margin in the network at 41.5% ($174,300 profit on $420,000 revenue), followed by Consumer Electronics on Shanghai → Singapore at 31.0%.',
+      answer: 'Singapore → Dubai Air Express (R014) delivers the highest profit margin in the network at 41.5% ($174,300 profit on $420,000 revenue), followed by Consumer Electronics on Shanghai → Singapore at 31.0%.',
+      findings: [
+        {
+          title: 'Singapore → Dubai Air Express (R014)',
+          detail: '41.5% gross profit margin driven by high-value urgent pharma and computing components.',
+          severity: 'resolved',
+          highlight: '41.5% Gross Margin'
+        },
+        {
+          title: 'Shanghai → Singapore (R001)',
+          detail: '31.0% gross margin with the highest absolute revenue contribution ($1.42M).',
+          severity: 'info',
+          highlight: '31.0% Margin'
+        },
+        {
+          title: 'Shenzhen → Rotterdam (R004)',
+          detail: '30.5% margin with consistent premium carrier reliability.',
+          severity: 'info',
+          highlight: '30.5% Margin'
+        }
+      ],
+      recommendations: [
+        'Expand charter capacity for priority air freight on Singapore → Dubai corridor',
+        'Upsell expedited transit options to enterprise VIP customers'
+      ],
+      metrics: {
+        highest_margin_lane: 'Singapore → Dubai Air Express',
+        highest_margin_pct: '41.5%',
+        network_avg_margin: '29.5%'
+      },
+      suggestedAction: {
+        label: 'View Revenue',
+        navId: 'revenue'
+      }
+    };
+  }
+
+  // 3. Growing fastest
+  if (q.includes('grow') || q.includes('fastest')) {
+    return {
+      status: 'success',
+      agent: 'athena',
+      agentName: 'ATHENA',
+      role: 'Route Analyst',
+      question: questionRaw || 'Which route is growing fastest?',
+      summary: 'Shanghai → Singapore (R001) is growing fastest at +18.2% volume growth, followed closely by Singapore → Rotterdam (R002) at +16.7% and Shanghai → Jebel Ali (R011) at +15.4%.',
+      answer: 'Shanghai → Singapore (R001) is growing fastest at +18.2% volume growth, followed closely by Singapore → Rotterdam (R002) at +16.7% and Shanghai → Jebel Ali (R011) at +15.4%.',
+      findings: [
+        {
+          title: 'Shanghai → Singapore (R001)',
+          detail: 'Pacing at +18.2% volume expansion fueled by APAC consumer electronics and AI chip demand.',
+          severity: 'resolved',
+          highlight: '+18.2% Growth'
+        },
+        {
+          title: 'Singapore → Rotterdam (R002)',
+          detail: '+16.7% YoY growth with high container turn-times and 97% schedule reliability.',
+          severity: 'info',
+          highlight: '+16.7% Growth'
+        },
+        {
+          title: 'Shanghai → Jebel Ali (R011)',
+          detail: '+15.4% growth serving Middle Eastern renewable and tech infrastructure projects.',
+          severity: 'info',
+          highlight: '+15.4% Growth'
+        }
+      ],
+      recommendations: [
+        'Add feeder vessel slots on Shanghai → Singapore to capture unmet forward demand',
+        'Increase container inventory staging at Singapore transshipment hub'
+      ],
+      metrics: {
+        fastest_growing_lane: 'Shanghai → Singapore',
+        top_growth_rate: '+18.2%',
+        total_rising_corridors: '7 Corridors'
+      },
+      suggestedAction: {
+        label: 'View Rising',
+        navId: 'rising'
+      }
+    };
+  }
+
+  // 4. Routes needing attention / declining / falling
+  if (q.includes('attention') || q.includes('falling') || q.includes('declining') || q.includes('worst') || q.includes('problem') || q.includes('risk') || q.includes('underperforming')) {
+    return {
+      status: 'success',
+      agent: 'athena',
+      agentName: 'ATHENA',
+      role: 'Route Analyst',
+      question: questionRaw || 'Which route needs attention?',
+      summary: 'Hamburg → Jebel Ali (R007) requires immediate operational attention due to -7.4% volume contraction, low reliability (76.0%), and severe container dwell (4.1 days) at Hamburg. Los Angeles → Rotterdam (R015) is also on watch (-3.6% growth, 79% reliability).',
+      answer: 'Hamburg → Jebel Ali (R007) requires immediate operational attention due to -7.4% volume contraction, low reliability (76.0%), and severe container dwell (4.1 days) at Hamburg. Los Angeles → Rotterdam (R015) is also on watch (-3.6% growth, 79% reliability).',
+      findings: [
+        {
+          title: 'Hamburg → Jebel Ali (R007)',
+          detail: 'Volume contracted -7.4% with 76.0% service reliability. Elbe shallow draft restrictions causing container dwell of 4.1 days.',
+          severity: 'critical',
+          highlight: 'Opportunity Score: 48 (Falling)'
+        },
+        {
+          title: 'Los Angeles → Rotterdam (R015)',
+          detail: 'Volume down -3.6% with 79% reliability due to North Pacific weather variability and chassis staging delays.',
+          severity: 'warning',
+          highlight: 'Watch Lane'
+        },
+        {
+          title: 'Rotterdam → Mumbai (R008)',
+          detail: '-4.2% volume contraction and elevated empty container repositioning costs.',
+          severity: 'warning',
+          highlight: 'Margin Pressure'
+        }
+      ],
+      recommendations: [
+        'Shift non-urgent container cargo from Hamburg to Antwerp barge connections',
+        'Renegotiate spot carrier commitments on the Hamburg corridor to prevent margin slippage',
+        'Implement dynamic buffer alerts (+12h) for Los Angeles sailings'
+      ],
+      metrics: {
+        routes_requiring_attention: '2 Primary Corridors',
+        lowest_reliability_lane: 'Hamburg → Jebel Ali (76.0%)',
+        avg_dwell_hamburg: '4.1 Days'
+      },
+      suggestedAction: {
+        label: 'View Falling',
+        navId: 'falling'
+      }
+    };
+  }
+
+  // 5. Increase capacity
+  if (q.includes('capacity') || q.includes('increase') || q.includes('expand')) {
+    return {
+      status: 'success',
+      agent: 'athena',
+      agentName: 'ATHENA',
+      role: 'Route Analyst',
+      question: questionRaw || 'Where should we increase capacity?',
+      summary: 'Odyssey should prioritize increasing capacity on Shanghai → Singapore (+15% feeder container slots) and Singapore → Rotterdam (+10% vessel capacity), where demand growth (+18.2%) outpaces current vessel commitments and reliability exceeds 97%.',
+      answer: 'Odyssey should prioritize increasing capacity on Shanghai → Singapore (+15% feeder container slots) and Singapore → Rotterdam (+10% vessel capacity), where demand growth (+18.2%) outpaces current vessel commitments and reliability exceeds 97%.',
+      findings: [
+        {
+          title: 'Shanghai → Singapore (R001)',
+          detail: 'Demand utilization at 92%. Expanding feeder slots by +15% can capture an estimated $120,000 additional monthly margin.',
+          severity: 'resolved',
+          highlight: '+15% Capacity Recommended'
+        },
+        {
+          title: 'Singapore → Rotterdam (R002)',
+          detail: 'High vessel fill rates (89%) and 97% reliability warrant securing additional forward tier-1 carrier allocations.',
+          severity: 'info',
+          highlight: '+10% Capacity'
+        },
+        {
+          title: 'Capacity Reallocation Source',
+          detail: 'Underutilized equipment from the Hamburg → Jebel Ali corridor (-7.4% growth) should be shifted to Asian growth lanes.',
+          severity: 'info',
+          highlight: 'Fleet Repositioning'
+        }
+      ],
+      recommendations: [
+        'Contract 120 additional TEU weekly slots on Shanghai → Singapore feeder loops',
+        'Reposition empty containers from Northern Europe to Shanghai and Ningbo hubs',
+        'Engage Vertex Electronics on guaranteed volume SLA pricing'
+      ],
+      metrics: {
+        recommended_lane: 'Shanghai → Singapore',
+        target_capacity_increase: '+15%',
+        expected_monthly_margin_gain: '+$120K'
+      },
+      suggestedAction: {
+        label: 'View Rising',
+        navId: 'rising'
+      }
+    };
+  }
+
+  // 6. Best performing overall
+  return {
+    status: 'success',
+    agent: 'athena',
+    agentName: 'ATHENA',
+    role: 'Route Analyst',
+    question: questionRaw || 'Which routes are performing best overall?',
+    summary: 'The top 3 performing corridors across Odyssey\'s 20-lane global network are:\n1. Shanghai → Singapore (Opportunity Score: 92, +18.2% growth, 98% reliability)\n2. Singapore → Rotterdam (Opportunity Score: 91, +16.7% growth, 97% reliability)\n3. Singapore → Dubai Air Express (Opportunity Score: 89, 41.5% margin, 96% reliability)',
+    answer: 'The top 3 performing corridors across Odyssey\'s 20-lane global network are:\n1. Shanghai → Singapore (Opportunity Score: 92, +18.2% growth, 98% reliability)\n2. Singapore → Rotterdam (Opportunity Score: 91, +16.7% growth, 97% reliability)\n3. Singapore → Dubai Air Express (Opportunity Score: 89, 41.5% margin, 96% reliability)',
+    findings: [
+      {
+        title: 'Shanghai → Singapore (R001)',
+        detail: 'Leading network lane with +18.2% growth, $440,000 profit, 31.0% margin, and 98% reliability.',
+        severity: 'resolved',
+        highlight: 'Opportunity Score: 92'
+      },
+      {
+        title: 'Singapore → Rotterdam (R002)',
+        detail: 'Solid trade bridge with +16.7% growth, $385,000 profit, and 97% reliability.',
+        severity: 'resolved',
+        highlight: 'Opportunity Score: 91'
+      },
+      {
+        title: 'Singapore → Dubai Air Express (R014)',
+        detail: 'Top margin corridor (41.5%) providing expedited delivery for premium tech and medical cargo.',
+        severity: 'info',
+        highlight: 'Opportunity Score: 89'
+      }
+    ],
+    recommendations: [
+      'Maintain strong carrier rate parity on top 3 opportunity corridors',
+      'Leverage high reliability (97%+) to market priority SLA contracts to enterprise VIPs'
+    ],
+    metrics: {
+      total_network_corridors: 20,
+      rising_opportunity_lanes: 7,
+      top_lane_growth: '+18.2%',
+      network_avg_reliability: '94.2%'
+    },
+    suggestedAction: {
+      label: 'View Rising',
+      navId: 'rising'
+    }
+  };
+}
+
+const handleAthenaRouteAnalyst = async (req: Request, res: Response) => {
+  try {
+    const { question, query, task = 'route_analysis', filters = {}, context = {} } = req.body || {};
+    const userQuestion = (question || query || (task === 'analyze_routes' ? 'Analyze route performance and opportunity corridors' : task)).trim();
+
+    const db = await getDb();
+    
+    // Query Master Routes and their aggregated performance
+    const rawRoutes = parseQueryResults(db.exec(`
+      SELECT 
+        r.route_id,
+        r.origin_name,
+        r.dest_name,
+        r.mode,
+        r.transit_days,
+        r.growth_pct,
+        r.reliability_pct,
+        r.opportunity_score,
+        r.signal,
+        r.risk_level,
+        count(s.shipment_id) as shipment_count,
+        sum(s.revenue_usd) as revenue,
+        sum(s.total_cost_usd) as cost,
+        sum(s.profit_usd) as profit,
+        ROUND(avg(s.margin_pct), 1) as margin_pct
+      FROM routes r
+      LEFT JOIN shipments s ON r.route_id = s.route_id
+      GROUP BY r.route_id
+      ORDER BY r.opportunity_score DESC
+    `));
+
+    const routeData = rawRoutes.map((r) => ({
+      routeId: r.route_id,
+      lane: `${r.origin_name} → ${r.dest_name}`,
+      origin: r.origin_name,
+      destination: r.dest_name,
+      mode: r.mode,
+      transitDays: Number(r.transit_days || 0),
+      revenue: Number(r.revenue || 0),
+      cost: Number(r.cost || 0),
+      profit: Number(r.profit || 0),
+      marginPct: Number(r.margin_pct || 0),
+      growthPct: Number(r.growth_pct || 0),
+      reliabilityPct: Number(r.reliability_pct || 0),
+      opportunityScore: Number(r.opportunity_score || 0),
+      signal: r.signal,
+      riskLevel: r.risk_level
+    }));
+
+    // Server-side n8n webhook URL configuration
+    const webhookUrl = process.env.ATHENA_WEBHOOK_URL || process.env.ROUTE_ANALYST_WEBHOOK_URL || 'https://phenomenal2005.app.n8n.cloud/webhook/athena-route-analysis';
+    const isWebhookConfigured = Boolean(webhookUrl && webhookUrl.trim().startsWith('http'));
+
+    const outboundPayload = {
+      agent: 'athena',
+      agentName: 'ATHENA',
+      role: 'Route Analyst',
+      purpose: 'Analyses route performance and identifies opportunities.',
+      task: task || 'route_analysis',
+      question: userQuestion,
+      source: 'odyssey',
+      timestamp: new Date().toISOString(),
+      filters,
+      context: {
+        ...context,
+        user: 'Alexander Vance',
+        role: 'Head of Global Logistics',
+        environment: 'production'
+      },
+      routes: routeData,
+      networkSummary: {
+        totalCorridors: routeData.length,
+        topOpportunity: 'Shanghai → Singapore',
+        topMarginLane: 'Singapore → Dubai Air Express (41.5%)',
+        decliningLane: 'Hamburg → Jebel Ali (-7.4%)',
+        totalRevenue: '$11.84M',
+        totalProfit: '$3.49M',
+        networkGrossMargin: '29.5%',
+        avgReliability: '94.2%'
+      }
+    };
+
+    if (isWebhookConfigured) {
+      try {
+        const n8nResponse = await fetch(webhookUrl.trim(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(outboundPayload),
+          signal: AbortSignal.timeout(5000)
+        });
+
+        if (n8nResponse.ok) {
+          const rawText = await n8nResponse.text();
+          let n8nData: any = {};
+          try {
+            n8nData = JSON.parse(rawText);
+          } catch (err) {
+            n8nData = { output: rawText };
+          }
+
+          let responseText = '';
+          if (typeof n8nData === 'string') {
+            responseText = n8nData;
+          } else if (Array.isArray(n8nData)) {
+            responseText = n8nData[0]?.output || n8nData[0]?.text || n8nData[0]?.response || n8nData[0]?.message || n8nData[0]?.answer || n8nData[0]?.summary || JSON.stringify(n8nData[0]);
+          } else if (n8nData && typeof n8nData === 'object') {
+            responseText = n8nData.output || n8nData.text || n8nData.response || n8nData.message || n8nData.answer || n8nData.summary || n8nData.result || '';
+          }
+
+          if (responseText) {
+            return res.json({
+              status: 'success',
+              agent: 'athena',
+              agentName: 'ATHENA',
+              role: 'Route Analyst',
+              source: 'external_webhook',
+              question: userQuestion,
+              answer: responseText,
+              summary: responseText,
+              findings: n8nData.findings || [
+                {
+                  title: 'Athena n8n Route Analysis',
+                  detail: responseText.length > 200 ? responseText.slice(0, 197) + '...' : responseText,
+                  severity: 'resolved',
+                  highlight: 'Live n8n Node'
+                }
+              ],
+              recommendations: n8nData.recommendations || [
+                'Prioritize volume allocations on rising high-opportunity corridors',
+                'Monitor margin spread against fuel index and port congestion dwell'
+              ],
+              metrics: n8nData.metrics || {
+                analyzed_corridors: 20,
+                workflow_status: 'Published n8n Workflow',
+                environment: 'Production'
+              },
+              suggestedAction: n8nData.suggestedAction || {
+                label: 'View Rising',
+                navId: 'rising'
+              },
+              timestamp: new Date().toISOString(),
+              webhookStatus: {
+                configured: true,
+                online: true,
+                envVar: 'ATHENA_WEBHOOK_URL'
+              }
+            });
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[Athena Route Analyst] n8n webhook timed out or failed (${err.message}). Using local prototype intelligence.`);
+      }
+    }
+
+    // Local Fallback Route Intelligence Engine
+    const localResult = generateLocalAthenaAnalysis(userQuestion, task);
+    return res.json({
+      ...localResult,
+      source: 'local_prototype',
+      timestamp: new Date().toISOString(),
+      webhookStatus: {
+        configured: isWebhookConfigured,
+        online: false,
+        envVar: 'ATHENA_WEBHOOK_URL'
+      }
+    });
+
   } catch (error: any) {
     res.status(500).json({ status: 'error', error: error.message });
   }
 };
 
-apiRouter.post('/agents/route-analyst', handleRouteAnalyst);
-apiRouter.get('/agents/route-analyst', handleRouteAnalyst);
+// Mount both /api/athena and /api/agents/route-analyst
+apiRouter.post('/athena', handleAthenaRouteAnalyst);
+apiRouter.get('/athena', handleAthenaRouteAnalyst);
+apiRouter.post('/agents/route-analyst', handleAthenaRouteAnalyst);
+apiRouter.get('/agents/route-analyst', handleAthenaRouteAnalyst);
 
 // 10.4 AGENT NODE 3: Risk Analyst Endpoint
 const handleRiskAnalyst = async (req: Request, res: Response) => {

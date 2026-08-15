@@ -110,12 +110,28 @@ export async function runAgentNode(endpoint: string, task?: string, filters?: an
   return res.json();
 }
 
+export async function askAthena(question: string, context?: any) {
+  const res = await fetch('/api/athena', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question, context })
+  });
+  if (!res.ok) throw new Error('Failed to reach Athena endpoint');
+  return res.json();
+}
+
 export async function runJourneyMonitor(task = 'run_check', filters?: any) {
   return runAgentNode('/api/agents/journey-monitor', task, filters);
 }
 
-export async function runRouteAnalyst(task = 'analyze_routes', filters?: any) {
-  return runAgentNode('/api/agents/route-analyst', task, filters);
+export async function runRouteAnalyst(task = 'analyze_routes', filters?: any, question?: string) {
+  const res = await fetch('/api/athena', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ task, filters, question })
+  });
+  if (!res.ok) throw new Error('Athena route analysis failed');
+  return res.json();
 }
 
 export async function runRiskAnalyst(task = 'run_risk_check', filters?: any) {

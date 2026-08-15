@@ -611,15 +611,15 @@ export const MOCK_SMART_STAFF_AGENTS: SmartStaffAgent[] = [
   },
   {
     id: 'route-analyst',
-    name: 'Route Analyst',
-    role: 'Network & Optimization',
-    purpose: 'Analyzes route profitability, growth, reliability and opportunity.',
+    name: 'Athena',
+    role: 'Route Analyst',
+    purpose: 'Analyses route performance and identifies opportunities.',
     status: 'Online',
     watching: '20 corridors',
     latestSummary: 'Shanghai → Singapore #1 opportunity (+18.2%)',
     avatarIcon: 'TrendingUp',
-    endpoint: '/api/agents/route-analyst',
-    webhookEnvVar: 'ROUTE_ANALYST_WEBHOOK_URL',
+    endpoint: '/api/athena',
+    webhookEnvVar: 'ATHENA_WEBHOOK_URL',
     isWebhookConfigured: false,
     capabilities: [
       'Compare routes',
@@ -631,9 +631,9 @@ export const MOCK_SMART_STAFF_AGENTS: SmartStaffAgent[] = [
     ],
     primaryAction: {
       id: 'analyze-routes',
-      label: 'Analyze Routes',
+      label: 'Ask Athena / Analyze',
       task: 'analyze_routes',
-      taskDescription: 'Analyzing route profitability, volume growth, and opportunity lanes...'
+      taskDescription: 'Analyses route performance, volume growth, and opportunity lanes...'
     },
     secondaryAction: {
       id: 'view-rising',

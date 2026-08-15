@@ -20,14 +20,30 @@ import {
   Play,
   Check,
   ExternalLink,
-  Code
+  Code,
+  Send,
+  MessageSquare,
+  Bot,
+  HelpCircle,
+  AlertCircle,
+  RotateCcw
 } from 'lucide-react';
 import { SmartStaffAgent, AgentRunResult, StaffActivityItem } from '../../types/enterprise';
-import { fetchSmartStaffData, runAgentNode } from '../../services/api';
+import { fetchSmartStaffData, runAgentNode, askAthena } from '../../services/api';
 
 interface SmartStaffViewProps {
   onNavigateToView?: (viewId: string) => void;
 }
+
+// Starter prompts for Athena Route Analyst
+const ATHENA_STARTER_PROMPTS = [
+  'Which route is most profitable?',
+  'Which route needs attention?',
+  'Where should we increase capacity?',
+  'Which routes are performing best?',
+  'Which route has the highest margin?',
+  'Which route is growing fastest?'
+];
 
 // 4 Primary Smart Staff AI Workers
 const DEFAULT_STAFF_AGENTS: SmartStaffAgent[] = [
@@ -65,15 +81,15 @@ const DEFAULT_STAFF_AGENTS: SmartStaffAgent[] = [
   },
   {
     id: 'route-analyst',
-    name: 'Route Analyst',
-    role: 'Network & Optimization',
-    purpose: 'Analyzes route profitability, growth, reliability and opportunity.',
+    name: 'Athena',
+    role: 'Route Analyst',
+    purpose: 'Analyses route performance and identifies opportunities.',
     status: 'Online',
     watching: '20 corridors',
     latestSummary: 'Shanghai → Singapore #1 opportunity (+18.2%)',
     avatarIcon: 'TrendingUp',
-    endpoint: '/api/agents/route-analyst',
-    webhookEnvVar: 'ROUTE_ANALYST_WEBHOOK_URL',
+    endpoint: '/api/athena',
+    webhookEnvVar: 'ATHENA_WEBHOOK_URL',
     isWebhookConfigured: false,
     capabilities: [
       'Compare routes',
@@ -85,9 +101,9 @@ const DEFAULT_STAFF_AGENTS: SmartStaffAgent[] = [
     ],
     primaryAction: {
       id: 'analyze-routes',
-      label: 'Analyze Routes',
+      label: 'Ask Athena / Analyze',
       task: 'analyze_routes',
-      taskDescription: 'Analyzing route profitability, volume growth, and opportunity lanes...'
+      taskDescription: 'Analyses route performance, volume growth, and opportunity corridors...'
     },
     secondaryAction: {
       id: 'view-rising',
@@ -191,7 +207,7 @@ const RECENT_STAFF_ACTIVITY: StaffActivityItem[] = [
   {
     id: 'act-3',
     time: '08:40',
-    agentName: 'Route Analyst',
+    agentName: 'Athena (Route Analyst)',
     agentId: 'route-analyst',
     role: 'Network & Optimization',
     action: 'Ranked top opportunity lanes',
@@ -217,8 +233,11 @@ export const SmartStaffView: React.FC<SmartStaffViewProps> = ({ onNavigateToView
   const [activeRunningAgent, setActiveRunningAgent] = useState<SmartStaffAgent | null>(null);
   const [isRunningTask, setIsRunningTask] = useState<boolean>(false);
   const [runResult, setRunResult] = useState<AgentRunResult | null>(null);
+  const [agentError, setAgentError] = useState<string | null>(null);
+  const [athenaInputQuestion, setAthenaInputQuestion] = useState<string>('');
+  const [lastAskedQuestion, setLastAskedQuestion] = useState<string>('');
   const [showConnectionNodes, setShowConnectionNodes] = useState<boolean>(false);
-  const [selectedPayloadTab, setSelectedPayloadTab] = useState<string>('journey-monitor');
+  const [selectedPayloadTab, setSelectedPayloadTab] = useState<string>('route-analyst');
 
   useEffect(() => {
     fetchSmartStaffData()
@@ -247,44 +266,59 @@ export const SmartStaffView: React.FC<SmartStaffViewProps> = ({ onNavigateToView
     }
   };
 
-  const handleRunAgent = async (agent: SmartStaffAgent) => {
+  const handleOpenAgent = (agent: SmartStaffAgent) => {
+    setActiveRunningAgent(agent);
+    setAgentError(null);
+    setRunResult(null);
+    setAthenaInputQuestion('');
+    setLastAskedQuestion('');
+    
+    // If not Athena, trigger run immediately
+    if (agent.id !== 'route-analyst') {
+      handleRunAgent(agent);
+    }
+  };
+
+  const handleRunAgent = async (agent: SmartStaffAgent, customQuestion?: string) => {
     setActiveRunningAgent(agent);
     setIsRunningTask(true);
-    setRunResult(null);
+    setAgentError(null);
+    if (customQuestion) {
+      setLastAskedQuestion(customQuestion);
+    }
 
     try {
-      // Execute the open agent node endpoint
-      const result = await runAgentNode(agent.endpoint, agent.primaryAction.task);
+      let result;
+      if (agent.id === 'route-analyst' || agent.endpoint.includes('athena')) {
+        result = await askAthena(customQuestion || athenaInputQuestion || agent.primaryAction.task);
+      } else {
+        result = await runAgentNode(agent.endpoint, agent.primaryAction.task);
+      }
+
+      if (result.status === 'error') {
+        throw new Error(result.error || 'Agent returned an error status.');
+      }
+
       setRunResult(result);
     } catch (err: any) {
-      // Fallback display if network or local request encounters transient issue
-      setRunResult({
-        status: 'success',
-        agent: agent.id,
-        agentName: agent.name,
-        role: agent.role,
-        source: 'local_prototype',
-        task: agent.primaryAction.task,
-        summary: agent.sampleResult || 'Analysis completed using local Odyssey database intelligence.',
-        findings: [
-          {
-            title: `${agent.name} Local Check`,
-            detail: `Evaluated ${agent.watching}. All parameters verified against baseline thresholds.`,
-            severity: 'info'
-          }
-        ],
-        recommendations: [
-          `Review active ${agent.role.toLowerCase()} metrics in the main workspace.`
-        ],
-        timestamp: new Date().toISOString(),
-        suggestedAction: {
-          label: agent.secondaryAction.label,
-          navId: agent.secondaryAction.navId
-        }
-      });
+      console.error('Agent execution error:', err);
+      setAgentError(err.message || 'Unable to connect to agent service. Please try again.');
     } finally {
       setIsRunningTask(false);
     }
+  };
+
+  const handleAthenaPromptClick = (prompt: string) => {
+    setAthenaInputQuestion(prompt);
+    if (activeRunningAgent) {
+      handleRunAgent(activeRunningAgent, prompt);
+    }
+  };
+
+  const handleAthenaSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!athenaInputQuestion.trim() || !activeRunningAgent || isRunningTask) return;
+    handleRunAgent(activeRunningAgent, athenaInputQuestion.trim());
   };
 
   const handleSecondaryAction = (navId: string) => {
@@ -292,6 +326,8 @@ export const SmartStaffView: React.FC<SmartStaffViewProps> = ({ onNavigateToView
       onNavigateToView(navId);
     }
   };
+
+  const isAthena = activeRunningAgent?.id === 'route-analyst' || activeRunningAgent?.name.toLowerCase().includes('athena');
 
   return (
     <div className="space-y-8 max-w-7xl mx-auto p-6 lg:p-8 pb-32">
@@ -337,35 +373,38 @@ export const SmartStaffView: React.FC<SmartStaffViewProps> = ({ onNavigateToView
                 </h3>
               </div>
               <p className="text-[11px] text-slate-400 pt-0.5">
-                4 independent server-side REST endpoints ready to receive webhook configurations. Fallback to local SQLite intelligence is active.
+                4 independent server-side REST endpoints ready to receive webhook configurations. Athena is connected to its published n8n workflow.
               </p>
             </div>
             <span className="text-[10px] font-mono-code px-2.5 py-1 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-300 w-fit">
-              Architecture Ready
+              Athena Live Node Active
             </span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-            {agents.map((agent) => (
-              <div key={agent.id} className="p-3.5 rounded-xl bg-[#090D16] border border-slate-800 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-white">{agent.name}</span>
-                  <span className="text-[10px] font-mono-code px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                    Active
-                  </span>
+            {agents.map((agent) => {
+              const isAthenaCard = agent.id === 'route-analyst';
+              return (
+                <div key={agent.id} className="p-3.5 rounded-xl bg-[#090D16] border border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-white">{agent.name}</span>
+                    <span className="text-[10px] font-mono-code px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                      {isAthenaCard ? 'n8n Live' : 'Active'}
+                    </span>
+                  </div>
+                  <div className="text-[10px] font-mono-code text-blue-300 break-all bg-[#0B0F19] p-1.5 rounded border border-slate-800">
+                    POST {agent.endpoint}
+                  </div>
+                  <div className="text-[10px] text-slate-400 flex items-center justify-between">
+                    <span>Env Variable:</span>
+                    <span className="font-mono-code text-slate-300">{agent.webhookEnvVar}</span>
+                  </div>
+                  <div className="text-[10px] text-slate-500 pt-1 border-t border-slate-800/80">
+                    Status: <span className="text-emerald-400">{isAthenaCard ? 'Published n8n Workflow' : 'Local Prototype Engine'}</span>
+                  </div>
                 </div>
-                <div className="text-[10px] font-mono-code text-blue-300 break-all bg-[#0B0F19] p-1.5 rounded border border-slate-800">
-                  POST {agent.endpoint}
-                </div>
-                <div className="text-[10px] text-slate-400 flex items-center justify-between">
-                  <span>Env Variable:</span>
-                  <span className="font-mono-code text-slate-300">{agent.webhookEnvVar}</span>
-                </div>
-                <div className="text-[10px] text-slate-500 pt-1 border-t border-slate-800/80">
-                  Status: <span className="text-emerald-400">Local Prototype Engine</span>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* SAMPLE PAYLOAD EXPLORER */}
@@ -394,15 +433,17 @@ export const SmartStaffView: React.FC<SmartStaffViewProps> = ({ onNavigateToView
             <pre className="p-3 rounded-xl bg-[#070A10] border border-slate-800 text-[10px] font-mono-code text-emerald-300 overflow-x-auto">
 {JSON.stringify(
   {
-    agent: selectedPayloadTab.replace('-', '_'),
-    task: agents.find((a) => a.id === selectedPayloadTab)?.primaryAction.task || 'run_check',
+    agent: selectedPayloadTab === 'route-analyst' ? 'athena' : selectedPayloadTab.replace('-', '_'),
+    agentName: selectedPayloadTab === 'route-analyst' ? 'ATHENA' : agents.find((a) => a.id === selectedPayloadTab)?.name,
+    task: selectedPayloadTab === 'route-analyst' ? 'route_analysis' : agents.find((a) => a.id === selectedPayloadTab)?.primaryAction.task || 'run_check',
+    question: selectedPayloadTab === 'route-analyst' ? 'Which route is most profitable?' : undefined,
     source: 'odyssey',
-    timestamp: '2026-08-14T08:30:00.000Z',
+    timestamp: '2026-08-15T08:30:00.000Z',
     filters: {},
     context: {
       user: 'Alexander Vance',
       role: 'Head of Global Logistics',
-      environment: 'production_prototype'
+      environment: 'production'
     }
   },
   null,
@@ -415,88 +456,100 @@ export const SmartStaffView: React.FC<SmartStaffViewProps> = ({ onNavigateToView
 
       {/* 3. FOUR AGENT CARDS */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-        {agents.map((agent) => (
-          <div
-            key={agent.id}
-            className="p-5 rounded-2xl bg-[#111726] border border-slate-800/90 hover:border-slate-700/90 transition-all flex flex-col justify-between space-y-4 shadow-sm"
-          >
-            {/* CARD TOP */}
-            <div className="space-y-3.5">
-              {/* Header: Icon + Name & Role */}
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 rounded-xl bg-[#090D16] border border-slate-800">
-                    {getAgentIcon(agent.avatarIcon)}
+        {agents.map((agent) => {
+          const isAthenaCard = agent.id === 'route-analyst';
+          return (
+            <div
+              key={agent.id}
+              className={`p-5 rounded-2xl bg-[#111726] border transition-all flex flex-col justify-between space-y-4 shadow-sm ${
+                isAthenaCard ? 'border-blue-500/40 hover:border-blue-400' : 'border-slate-800/90 hover:border-slate-700/90'
+              }`}
+            >
+              {/* CARD TOP */}
+              <div className="space-y-3.5">
+                {/* Header: Icon + Name & Role */}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 rounded-xl bg-[#090D16] border border-slate-800">
+                      {getAgentIcon(agent.avatarIcon)}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <h3 className="text-sm font-bold text-white tracking-tight">{agent.name}</h3>
+                        {isAthenaCard && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-blue-500/20 text-blue-300 border border-blue-400/30">
+                            n8n
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[11px] text-blue-400 font-medium">{agent.role}</span>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-white tracking-tight">{agent.name}</h3>
-                    <span className="text-[11px] text-blue-400 font-medium">{agent.role}</span>
+
+                  {/* Status: Online */}
+                  <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-semibold">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <span>Online</span>
                   </div>
                 </div>
 
-                {/* Status: Online */}
-                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-semibold">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>Online</span>
-                </div>
-              </div>
+                {/* Purpose Description */}
+                <p className="text-xs text-slate-300 leading-relaxed min-h-[36px]">
+                  {agent.purpose}
+                </p>
 
-              {/* Purpose Description */}
-              <p className="text-xs text-slate-300 leading-relaxed min-h-[36px]">
-                {agent.purpose}
-              </p>
-
-              {/* Scope & Latest Summary Box */}
-              <div className="p-3 rounded-xl bg-[#090D16] border border-slate-800/80 space-y-2">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-slate-400 text-[11px]">Watching:</span>
-                  <span className="text-white font-semibold font-mono-code text-[11px]">{agent.watching}</span>
+                {/* Scope & Latest Summary Box */}
+                <div className="p-3 rounded-xl bg-[#090D16] border border-slate-800/80 space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-400 text-[11px]">Watching:</span>
+                    <span className="text-white font-semibold font-mono-code text-[11px]">{agent.watching}</span>
+                  </div>
+                  <div className="pt-1.5 border-t border-slate-800/60">
+                    <span className="text-slate-400 text-[10px] block">Latest:</span>
+                    <span className="text-slate-200 text-xs font-medium leading-snug block pt-0.5">
+                      {agent.latestSummary}
+                    </span>
+                  </div>
                 </div>
-                <div className="pt-1.5 border-t border-slate-800/60">
-                  <span className="text-slate-400 text-[10px] block">Latest:</span>
-                  <span className="text-slate-200 text-xs font-medium leading-snug block pt-0.5">
-                    {agent.latestSummary}
+
+                {/* What it can do (capabilities) */}
+                <div className="space-y-1 pt-1">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">
+                    Responsibilities
                   </span>
+                  <ul className="space-y-1">
+                    {agent.capabilities.slice(0, 3).map((cap, idx) => (
+                      <li key={idx} className="text-[11px] text-slate-300 flex items-center gap-1.5">
+                        <span className="w-1 h-1 rounded-full bg-slate-500" />
+                        <span className="truncate">{cap}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               </div>
 
-              {/* What it can do (capabilities) */}
-              <div className="space-y-1 pt-1">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">
-                  Responsibilities
-                </span>
-                <ul className="space-y-1">
-                  {agent.capabilities.slice(0, 3).map((cap, idx) => (
-                    <li key={idx} className="text-[11px] text-slate-300 flex items-center gap-1.5">
-                      <span className="w-1 h-1 rounded-full bg-slate-500" />
-                      <span className="truncate">{cap}</span>
-                    </li>
-                  ))}
-                </ul>
+              {/* CARD ACTIONS */}
+              <div className="pt-3 border-t border-slate-800/80 space-y-2">
+                <button
+                  onClick={() => handleOpenAgent(agent)}
+                  disabled={isRunningTask && activeRunningAgent?.id === agent.id}
+                  className="w-full py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-all shadow-md shadow-blue-600/20 flex items-center justify-center gap-2 group disabled:bg-blue-600/50"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current text-white" />
+                  <span>{agent.primaryAction.label}</span>
+                </button>
+
+                <button
+                  onClick={() => handleSecondaryAction(agent.secondaryAction.navId)}
+                  className="w-full py-2 px-3 rounded-xl bg-[#0B0F19] hover:bg-[#141B2D] border border-slate-800 text-slate-300 font-medium text-xs transition-colors flex items-center justify-center gap-1.5 text-center"
+                >
+                  <span>{agent.secondaryAction.label}</span>
+                  <ArrowRight className="w-3 h-3 text-slate-400" />
+                </button>
               </div>
             </div>
-
-            {/* CARD ACTIONS */}
-            <div className="pt-3 border-t border-slate-800/80 space-y-2">
-              <button
-                onClick={() => handleRunAgent(agent)}
-                disabled={isRunningTask && activeRunningAgent?.id === agent.id}
-                className="w-full py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-all shadow-md shadow-blue-600/20 flex items-center justify-center gap-2 group disabled:bg-blue-600/50"
-              >
-                <Play className="w-3.5 h-3.5 fill-current text-white" />
-                <span>{agent.primaryAction.label}</span>
-              </button>
-
-              <button
-                onClick={() => handleSecondaryAction(agent.secondaryAction.navId)}
-                className="w-full py-2 px-3 rounded-xl bg-[#0B0F19] hover:bg-[#141B2D] border border-slate-800 text-slate-300 font-medium text-xs transition-colors flex items-center justify-center gap-1.5 text-center"
-              >
-                <span>{agent.secondaryAction.label}</span>
-                <ArrowRight className="w-3 h-3 text-slate-400" />
-              </button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* 4. RECENT STAFF ACTIVITY SECTION */}
@@ -543,7 +596,7 @@ export const SmartStaffView: React.FC<SmartStaffViewProps> = ({ onNavigateToView
       {/* 5. AGENT DETAIL & RUN PANEL (LIGHTWEIGHT DRAWER / MODAL) */}
       {activeRunningAgent && (
         <div
-          className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4"
           onClick={() => {
             if (!isRunningTask) setActiveRunningAgent(null);
           }}
@@ -552,21 +605,28 @@ export const SmartStaffView: React.FC<SmartStaffViewProps> = ({ onNavigateToView
             className="w-full max-w-2xl bg-[#0E1422] border border-slate-700 rounded-2xl p-6 space-y-5 shadow-2xl max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* PANEL HEADER */}
+            {/* PANEL HEADER (ATHENA OR AGENT IDENTITY) */}
             <div className="flex items-start justify-between pb-4 border-b border-slate-800">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3.5">
                 <div className="p-3 rounded-xl bg-[#090D16] border border-slate-800">
                   {getAgentIcon(activeRunningAgent.avatarIcon, 'w-6 h-6')}
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h2 className="text-base font-bold text-white">{activeRunningAgent.name}</h2>
+                    <h2 className="text-base font-bold text-white tracking-tight">
+                      {activeRunningAgent.name}
+                    </h2>
                     <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">
                       {activeRunningAgent.role}
                     </span>
+                    {isAthena && (
+                      <span className="text-[10px] font-mono-code px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        n8n Connected
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-slate-400 pt-0.5">
-                    {activeRunningAgent.primaryAction.taskDescription}
+                    {activeRunningAgent.purpose || activeRunningAgent.primaryAction.taskDescription}
                   </p>
                 </div>
               </div>
@@ -580,14 +640,95 @@ export const SmartStaffView: React.FC<SmartStaffViewProps> = ({ onNavigateToView
               </button>
             </div>
 
+            {/* ATHENA INTERACTIVE QUERY INPUT & STARTER PROMPTS */}
+            {isAthena && (
+              <div className="space-y-3.5 p-4 rounded-xl bg-[#090D16] border border-slate-800/90">
+                <form onSubmit={handleAthenaSubmit} className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-semibold text-slate-300 flex items-center gap-1.5">
+                      <MessageSquare className="w-3.5 h-3.5 text-blue-400" />
+                      <span>Ask Athena a Route Analysis Question:</span>
+                    </label>
+                    <span className="text-[10px] text-slate-500">Press Enter or click Ask</span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={athenaInputQuestion}
+                      onChange={(e) => setAthenaInputQuestion(e.target.value)}
+                      placeholder="e.g. Which route is most profitable?"
+                      disabled={isRunningTask}
+                      className="flex-1 bg-[#111726] border border-slate-700 focus:border-blue-500 focus:outline-none rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 disabled:opacity-50 font-sans"
+                    />
+                    <button
+                      type="submit"
+                      disabled={isRunningTask || !athenaInputQuestion.trim()}
+                      className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>Ask</span>
+                    </button>
+                  </div>
+                </form>
+
+                {/* STARTER PROMPTS */}
+                <div className="space-y-1.5 pt-1 border-t border-slate-800/80">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">
+                    Starter Prompts:
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {ATHENA_STARTER_PROMPTS.map((prompt, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => handleAthenaPromptClick(prompt)}
+                        disabled={isRunningTask}
+                        className="px-2.5 py-1 rounded-lg bg-[#111726] hover:bg-[#161F33] border border-slate-700 text-[11px] text-slate-300 hover:text-white transition-colors disabled:opacity-50 text-left"
+                      >
+                        {prompt}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ERROR STATE WITH RETRY */}
+            {agentError && !isRunningTask && (
+              <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 space-y-3">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <h4 className="text-xs font-bold text-red-300">Agent Query Failed</h4>
+                    <p className="text-xs text-slate-300 leading-relaxed">{agentError}</p>
+                  </div>
+                </div>
+
+                <div className="pt-2 flex items-center justify-end gap-2">
+                  <button
+                    onClick={() => handleRunAgent(activeRunningAgent, lastAskedQuestion || athenaInputQuestion)}
+                    className="px-3 py-1.5 rounded-lg bg-red-600/80 hover:bg-red-600 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Retry Query</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* LOADING STATE */}
             {isRunningTask && (
               <div className="py-12 flex flex-col items-center justify-center space-y-3 text-center">
                 <RefreshCw className="w-8 h-8 text-blue-400 animate-spin" />
                 <div className="space-y-1">
-                  <h3 className="text-sm font-semibold text-white">Running {activeRunningAgent.name}...</h3>
+                  <h3 className="text-sm font-semibold text-white">
+                    {isAthena ? 'Querying Athena (Route Analyst)...' : `Running ${activeRunningAgent.name}...`}
+                  </h3>
                   <p className="text-xs text-slate-400">
-                    Querying real-time database records and active telemetry...
+                    {isAthena
+                      ? 'Connecting to published n8n workflow and evaluating 20 trade corridors...'
+                      : 'Querying real-time database records and active telemetry...'}
                   </p>
                 </div>
               </div>
@@ -600,23 +741,31 @@ export const SmartStaffView: React.FC<SmartStaffViewProps> = ({ onNavigateToView
                 <div className="flex items-center justify-between p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300">
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                    <span className="font-semibold">Analysis complete</span>
+                    <span className="font-semibold">Analysis Complete</span>
                   </div>
                   <div className="flex items-center gap-2 text-[11px] text-slate-400">
                     <span>Source:</span>
                     <span className="font-mono-code text-slate-200">
-                      {runResult.source === 'external_webhook' ? 'External Webhook Node' : 'Local Prototype Database'}
+                      {runResult.source === 'external_webhook' ? 'Published n8n Webhook' : 'Local Prototype Fallback Engine'}
                     </span>
                   </div>
                 </div>
 
+                {/* Display Question if asked */}
+                {lastAskedQuestion && (
+                  <div className="p-3 rounded-xl bg-[#111726] border border-slate-800 flex items-center gap-2 text-xs">
+                    <span className="text-slate-400">Query:</span>
+                    <span className="text-white font-medium italic font-sans">"{lastAskedQuestion}"</span>
+                  </div>
+                )}
+
                 {/* Primary Summary Text */}
                 <div className="p-4 rounded-xl bg-[#090D16] border border-slate-800 space-y-2">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                    Agent Result Summary
+                    {isAthena ? 'Athena Response & Insight' : 'Agent Result Summary'}
                   </span>
                   <p className="text-xs text-slate-100 whitespace-pre-line leading-relaxed font-sans">
-                    {runResult.summary}
+                    {runResult.answer || runResult.summary}
                   </p>
                 </div>
 
@@ -672,7 +821,7 @@ export const SmartStaffView: React.FC<SmartStaffViewProps> = ({ onNavigateToView
                 {/* Action CTA Buttons */}
                 <div className="pt-3 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">
                   <button
-                    onClick={() => handleRunAgent(activeRunningAgent)}
+                    onClick={() => handleRunAgent(activeRunningAgent, lastAskedQuestion || athenaInputQuestion)}
                     className="w-full sm:w-auto px-4 py-2 rounded-xl bg-[#111726] hover:bg-[#161F33] border border-slate-700 text-xs font-semibold text-slate-300 flex items-center justify-center gap-1.5 transition-colors"
                   >
                     <RefreshCw className="w-3.5 h-3.5" />
@@ -709,3 +858,4 @@ export const SmartStaffView: React.FC<SmartStaffViewProps> = ({ onNavigateToView
     </div>
   );
 };
+
